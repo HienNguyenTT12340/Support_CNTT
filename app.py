@@ -8,7 +8,7 @@ from datetime import datetime
 API_URL = "https://script.google.com/macros/s/AKfycbz_wIoCEjetiJ5j0D1CszZYWfYrYaQclM2lTlFl9Sr-oKI1wbNbObHtOwmgkDIJrKae/exec"
 
 # 2. Link Google Sheets của bạn (Đổi đuôi /edit... thành /export?format=csv để đọc dữ liệu công khai)
-SHEET_ID = "MÃ_ID_TRÊN_LINK_SHEET_CỦA_BẠN" 
+SHEET_ID = "1mySA4SihCcHY1lKO53tq0EiomDx1LUKkvRZgZLmPrnc" 
 CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 
 # Cấu hình giao diện
