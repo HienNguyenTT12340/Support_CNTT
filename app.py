@@ -3,93 +3,153 @@ import pandas as pd
 import requests
 from datetime import datetime
 
-# ĐƯỜNG DẪN CẤU HÌNH (Thay thông tin của bạn vào đây)
-# 1. Link Apps Script bạn vừa copy ở Bước 1
+# ====================================================
+# 1. CẤU HÌNH THÔNG TIN GOOGLE SHEETS CỦA BẠN
+# ====================================================
+# Dán link Apps Script (mã /exec) của bạn vào đây
 API_URL = "https://script.google.com/macros/s/AKfycbz_wIoCEjetiJ5j0D1CszZYWfYrYaQclM2lTlFl9Sr-oKI1wbNbObHtOwmgkDIJrKae/exec"
 
-# 2. Link Google Sheets của bạn (Đổi đuôi /edit... thành /export?format=csv để đọc dữ liệu công khai)
+# Dán ID file Google Sheets của bạn vào đây
 SHEET_ID = "1mySA4SihCcHY1lKO53tq0EiomDx1LUKkvRZgZLmPrnc" 
 CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 
-# Cấu hình giao diện
-st.set_page_config(page_title="IT Support Portal", layout="wide")
-st.title("💻 Hệ Thống Hỗ Trợ CNTT")
+# ====================================================
+# 2. ĐỊNH NGHĨA TÀI KHOẢN (Đơn giản, không cần DB)
+# ====================================================
+# Bạn có thể thêm bớt tài khoản admin hoặc user ở đây tùy ý
+ACCOUNTS = {
+    "admin": {"password": "admin123", "role": "admin"},
+    "user1": {"password": "user123", "role": "user"},
+    "user2": {"password": "user123", "role": "user"}
+}
 
-# Hàm đọc dữ liệu nhanh bằng Pandas
+# Cấu hình giao diện trang
+st.set_page_config(page_title="IT Support Portal", layout="wide")
+
+# Khởi tạo trạng thái đăng nhập nếu chưa có
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.username = ""
+    st.session_state.role = ""
+
+# Hàm đọc dữ liệu từ Google Sheets
 def load_data():
     try:
-        # Thêm biến ngẫu nhiên để tránh Google trả về cache cũ khi làm mới
         return pd.read_csv(f"{CSV_URL}&nocache={int(datetime.now().timestamp())}")
     except Exception:
         return pd.DataFrame(columns=["Mã Yêu Cầu", "Người Gửi", "Loại Dịch Vụ", "Nội Dung", "Trạng Thái", "Ngày Tạo"])
 
-df = load_data()
+# ====================================================
+# MÀN HÌNH 1: GIAO DIỆN ĐĂNG NHẬP (LOGIN)
+# ====================================================
+if not st.session_state.logged_in:
+    st.title("🔐 Đăng nhập hệ thống IT Support")
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        with st.form("login_form"):
+            username = st.text_input("Tài khoản").strip()
+            password = st.text_input("Mật khẩu", type="password")
+            btn_login = st.form_submit_button("Đăng nhập")
+            
+            if btn_login:
+                if username in ACCOUNTS and ACCOUNTS[username]["password"] == password:
+                    st.session_state.logged_in = True
+                    st.session_state.username = username
+                    st.session_state.role = ACCOUNTS[username]["role"]
+                    st.success("Đăng nhập thành công!")
+                    st.rerun()
+                else:
+                    st.error("Sai tài khoản hoặc mật khẩu!")
 
-tab_user, tab_admin = st.tabs(["🙋 Gửi & Theo dõi", "🛠️ Quản trị viên"])
+# ====================================================
+# MÀN HÌNH 2: GIAO DIỆN CHÍNH (Sau khi đăng nhập thành công)
+# ====================================================
+else:
+    # Thanh điều hướng phía trên / Nút Đăng xuất
+    col_title, col_logout = st.columns([5, 1])
+    with col_title:
+        st.title(f"💻 Hệ Thống Hỗ Trợ CNTT - Xin chào {st.session_state.username}!")
+    with col_logout:
+        if st.button("🚪 Đăng xuất"):
+            st.session_state.logged_in = False
+            st.session_state.username = ""
+            st.session_state.role = ""
+            st.rerun()
 
-# ----------------------------------------------------
-# TAB USER: GỬI YÊU CẦU
-# ----------------------------------------------------
-with tab_user:
-    st.header("Gửi yêu cầu mới")
-    with st.form("form_request", clear_on_submit=True):
-        user_name = st.text_input("Tên của bạn *")
-        service_type = st.selectbox("Dịch vụ cần hỗ trợ", ["Cài phần mềm", "Lỗi phần cứng", "Mất mạng mạng", "Tài khoản/Email"])
-        content = st.text_area("Chi tiết lỗi *")
-        submit = st.form_submit_button("Gửi hỗ trợ")
+    # Tải dữ liệu từ Sheet về
+    df = load_data()
+
+    # Phân quyền giao diện dựa trên vai trò (Role)
+    
+    # ------------------------------------------------
+    # PHÂN QUYỀN: TÀI KHOẢN QUẢN TRỊ VIÊN (ADMIN)
+    # ------------------------------------------------
+    if st.session_state.role == "admin":
+        st.subheader("🛠️ Khu vực dành riêng cho Quản trị viên")
         
-    if submit:
-        if user_name and content:
-            ticket_id = f"IT-{int(datetime.now().timestamp())}"
-            created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-            # Gửi dữ liệu qua Apps Script để ghi vào Sheet
-            payload = {
-                "action": "append",
-                "row": [ticket_id, user_name, service_type, content, "Chờ duyệt", created_at]
-            }
-            response = requests.post(API_URL, json=payload)
-            
-            if response.status_code == 200:
-                st.success(f"Đã gửi thành công! Mã số: {ticket_id}")
-                st.rerun()
-            else:
-                st.error("Có lỗi xảy ra khi kết nối dữ liệu!")
+        if df.empty or len(df) == 0:
+            st.info("Chưa có dữ liệu yêu cầu nào.")
         else:
-            st.error("Vui lòng điền đủ thông tin!")
-
-    st.markdown("---")
-    st.header("📋 Lịch sử yêu cầu")
-    st.dataframe(df, use_container_width=True)
-
-# ----------------------------------------------------
-# TAB ADMIN: DUYỆT TRẠNG THÁI
-# ----------------------------------------------------
-with tab_admin:
-    st.header("Xử lý yêu cầu")
-    if df.empty or len(df) == 0:
-        st.info("Chưa có dữ liệu yêu cầu nào.")
-    else:
-        ticket_list = df["Mã Yêu Cầu"].tolist()
-        selected_id = st.selectbox("Chọn mã yêu cầu cần duyệt:", ticket_list)
-        
-        ticket_info = df[df["Mã Yêu Cầu"] == selected_id].iloc[0]
-        st.write(f"Yêu cầu từ: **{ticket_info['Người Gửi']}** - Nội dung: {ticket_info['Nội Dung']}")
-        st.write(f"Trạng thái hiện tại: `{ticket_info['Trạng Thái']}`")
-        
-        new_status = st.selectbox("Đổi trạng thái thành:", ["Chờ duyệt", "Đang xử lý", "Đã hoàn thành"])
-        
-        if st.button("Cập nhật ngay"):
-            # Gửi lệnh cập nhật qua Apps Script
-            payload = {
-                "action": "update",
-                "ticket_id": selected_id,
-                "new_status": new_status
-            }
-            response = requests.post(API_URL, json=payload)
+            ticket_list = df["Mã Yêu Cầu"].tolist()
+            selected_id = st.selectbox("Chọn mã yêu cầu cần duyệt:", ticket_list)
             
-            if response.status_code == 200:
-                st.success(f"Đã cập nhật trạng thái {selected_id} thành {new_status}!")
-                st.rerun()
+            ticket_info = df[df["Mã Yêu Cầu"] == selected_id].iloc[0]
+            st.write(f"Yêu cầu từ: **{ticket_info['Người Gửi']}** - Nội dung: {ticket_info['Nội Dung']}")
+            st.write(f"Trạng thái hiện tại: `{ticket_info['Trạng Thái']}`")
+            
+            new_status = st.selectbox("Đổi trạng thái thành:", ["Chờ duyệt", "Đang xử lý", "Đã hoàn thành"])
+            
+            if st.button("Cập nhật trạng thái"):
+                payload = {
+                    "action": "update",
+                    "ticket_id": selected_id,
+                    "new_status": new_status
+                }
+                response = requests.post(API_URL, json=payload)
+                
+                if response.status_code == 200:
+                    st.success(f"Đã cập nhật trạng thái {selected_id} thành {new_status}!")
+                    st.rerun()
+                else:
+                    st.error("Cập nhật thất bại!")
+            
+            st.markdown("---")
+            st.subheader("📋 Danh sách toàn bộ yêu cầu trong hệ thống")
+            st.dataframe(df, use_container_width=True)
+
+    # ------------------------------------------------
+    # PHÂN QUYỀN: TÀI KHOẢN NGƯỜI DÙNG thường (USER)
+    # ------------------------------------------------
+    else:
+        st.subheader("🙋 Gửi yêu cầu mới")
+        with st.form("form_request", clear_on_submit=True):
+            service_type = st.selectbox("Dịch vụ cần hỗ trợ", ["Cài phần mềm", "Lỗi phần cứng", "Mất mạng", "Tài khoản/Email"])
+            content = st.text_area("Chi tiết lỗi *")
+            submit = st.form_submit_button("Gửi hỗ trợ")
+            
+        if submit:
+            if content:
+                ticket_id = f"IT-{int(datetime.now().timestamp())}"
+                created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                # Gửi dữ liệu qua Apps Script (Người Gửi lấy tự động từ tên Đăng nhập)
+                payload = {
+                    "action": "append",
+                    "row": [ticket_id, st.session_state.username, service_type, content, "Chờ duyệt", created_at]
+                }
+                response = requests.post(API_URL, json=payload)
+                
+                if response.status_code == 200:
+                    st.success(f"Đã gửi thành công! Mã số: {ticket_id}")
+                    st.rerun()
+                else:
+                    st.error("Có lỗi xảy ra khi kết nối dữ liệu!")
             else:
-                st.error("Cập nhật thất bại!")
+                st.error("Vui lòng điền chi tiết lỗi!")
+
+        st.markdown("---")
+        st.subheader("📋 Lịch sử yêu cầu của bạn")
+        # Lọc dữ liệu: User thông thường chỉ xem được đúng các ticket do chính mình gửi lên
+        user_df = df[df["Người Gửi"] == st.session_state.username]
+        st.dataframe(user_df, use_container_width=True)
