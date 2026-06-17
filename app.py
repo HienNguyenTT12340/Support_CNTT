@@ -1,39 +1,34 @@
 import streamlit as st
-import gspread
 import pandas as pd
+import requests
 from datetime import datetime
 
-# 1. KẾT NỐI GOOGLE SHEETS BẰNG LINK (Đã mở quyền chỉnh sửa)
-# Thay link Google Sheet của bạn vào đây
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1mySA4SihCcHY1lKO53tq0EiomDx1LUKkvRZgZLmPrnc/edit?gid=0#gid=0"
+# ĐƯỜNG DẪN CẤU HÌNH (Thay thông tin của bạn vào đây)
+# 1. Link Apps Script bạn vừa copy ở Bước 1
+API_URL = "https://script.google.com/macros/s/AKfycbz_wIoCEjetiJ5j0D1CszZYWfYrYaQclM2lTlFl9Sr-oKI1wbNbObHtOwmgkDIJrKae/exec"
 
-try:
-    # Kết nối public không cần file JSON bảo mật
-    gc = gspread.public_api()
-    sh = gc.open_by_url(SHEET_URL)
-    worksheet = sh.get_worksheet(0) # Lấy tab đầu tiên
-except Exception:
-    # Nếu chạy trên Streamlit Cloud, gspread cần xác thực ẩn bằng tài khoản anonymous
-    gc = gspread.oauth_from_dict({}) 
-    sh = gc.open_by_url(SHEET_URL)
-    worksheet = sh.get_worksheet(0)
+# 2. Link Google Sheets của bạn (Đổi đuôi /edit... thành /export?format=csv để đọc dữ liệu công khai)
+SHEET_ID = "MÃ_ID_TRÊN_LINK_SHEET_CỦA_BẠN" 
+CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 
-# Cấu hình giao diện Streamlit
-st.set_page_config(page_title="IT Support", layout="wide")
-st.title("💻 Hệ Thống Hỗ Trợ CNTT Tối Giản")
+# Cấu hình giao diện
+st.set_page_config(page_title="IT Support Portal", layout="wide")
+st.title("💻 Hệ Thống Hỗ Trợ CNTT")
 
-# Hàm đọc dữ liệu từ Sheet ra DataFrame
-def get_data():
-    data = worksheet.get_all_records()
-    return pd.DataFrame(data)
+# Hàm đọc dữ liệu nhanh bằng Pandas
+def load_data():
+    try:
+        # Thêm biến ngẫu nhiên để tránh Google trả về cache cũ khi làm mới
+        return pd.read_csv(f"{CSV_URL}&nocache={int(datetime.now().timestamp())}")
+    except Exception:
+        return pd.DataFrame(columns=["Mã Yêu Cầu", "Người Gửi", "Loại Dịch Vụ", "Nội Dung", "Trạng Thái", "Ngày Tạo"])
 
-df = get_data()
+df = load_data()
 
-# Chia 2 Tab: Người dùng và Admin
-tab_user, tab_admin = st.tabs(["🙋 Gửi & Theo dõi", "🛠️ Quản trị viên"]) [cite: 11]
+tab_user, tab_admin = st.tabs(["🙋 Gửi & Theo dõi", "🛠️ Quản trị viên"])
 
 # ----------------------------------------------------
-# TAB USER: GỬI VÀ XEM TRẠNG THÁI
+# TAB USER: GỬI YÊU CẦU
 # ----------------------------------------------------
 with tab_user:
     st.header("Gửi yêu cầu mới")
@@ -48,12 +43,20 @@ with tab_user:
             ticket_id = f"IT-{int(datetime.now().timestamp())}"
             created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            # Ghi trực tiếp dòng mới xuống Google Sheets
-            worksheet.append_row([ticket_id, user_name, service_type, content, "Chờ duyệt", created_at])
-            st.success(f"Đã gửi! Mã số của bạn là: {ticket_id}")
-            st.rerun()
+            # Gửi dữ liệu qua Apps Script để ghi vào Sheet
+            payload = {
+                "action": "append",
+                "row": [ticket_id, user_name, service_type, content, "Chờ duyệt", created_at]
+            }
+            response = requests.post(API_URL, json=payload)
+            
+            if response.status_code == 200:
+                st.success(f"Đã gửi thành công! Mã số: {ticket_id}")
+                st.rerun()
+            else:
+                st.error("Có lỗi xảy ra khi kết nối dữ liệu!")
         else:
-            st.error("Vui lòng nhập đủ Tên và Chi tiết lỗi!")
+            st.error("Vui lòng điền đủ thông tin!")
 
     st.markdown("---")
     st.header("📋 Lịch sử yêu cầu")
@@ -64,25 +67,29 @@ with tab_user:
 # ----------------------------------------------------
 with tab_admin:
     st.header("Xử lý yêu cầu")
-    if df.empty:
-        st.info("Chưa có dữ liệu.")
+    if df.empty or len(df) == 0:
+        st.info("Chưa có dữ liệu yêu cầu nào.")
     else:
-        # Chọn mã yêu cầu
         ticket_list = df["Mã Yêu Cầu"].tolist()
         selected_id = st.selectbox("Chọn mã yêu cầu cần duyệt:", ticket_list)
         
-        # Tìm vị trí dòng trên Google Sheet (gspread tính từ dòng 1, cộng thêm 2 do có tiêu đề)
-        row_idx = df[df["Mã Yêu Cầu"] == selected_id].index[0] + 2
-        current_status = df.iloc[row_idx - 2]["Trạng Thái"]
+        ticket_info = df[df["Mã Yêu Cầu"] == selected_id].iloc[0]
+        st.write(f"Yêu cầu từ: **{ticket_info['Người Gửi']}** - Nội dung: {ticket_info['Nội Dung']}")
+        st.write(f"Trạng thái hiện tại: `{ticket_info['Trạng Thái']}`")
         
-        st.write(f"Yêu cầu từ: **{df.iloc[row_idx - 2]['Người Gửi']}** - Nội dung: {df.iloc[row_idx - 2]['Nội Dung']}")
-        st.write(f"Trạng thái hiện tại: `{current_status}`")
-        
-        # Cập nhật trạng thái mới
         new_status = st.selectbox("Đổi trạng thái thành:", ["Chờ duyệt", "Đang xử lý", "Đã hoàn thành"])
         
         if st.button("Cập nhật ngay"):
-            # Cột "Trạng Thái" là cột thứ 5 trong Google Sheets
-            worksheet.update_cell(row_idx, 5, new_status)
-            st.success(f"Đã cập nhật dòng {row_idx} thành {new_status}!")
-            st.rerun()
+            # Gửi lệnh cập nhật qua Apps Script
+            payload = {
+                "action": "update",
+                "ticket_id": selected_id,
+                "new_status": new_status
+            }
+            response = requests.post(API_URL, json=payload)
+            
+            if response.status_code == 200:
+                st.success(f"Đã cập nhật trạng thái {selected_id} thành {new_status}!")
+                st.rerun()
+            else:
+                st.error("Cập nhật thất bại!")
